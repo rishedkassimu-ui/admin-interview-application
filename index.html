@@ -170,9 +170,9 @@
             border-radius: 8px;
         }
         
-        .table-responsive { overflow-x: auto; }
+        .table-responsive { overflow-x: auto !important; -webkit-overflow-scrolling: touch; max-width: 100%; }
         table {
-            width: 100%; border-collapse: collapse; margin-top: 1rem; background: white;
+            width: 100%; min-width: 700px; border-collapse: collapse; margin-top: 1rem; background: white;
         }
         th, td {
             border: 1px solid #e2e8f0; padding: 0.75rem; text-align: left; font-size: 0.9rem;
@@ -462,7 +462,12 @@
         }).catch(err => console.error("Firebase Sync Error: ", err));
     };
 
-    getDoc(doc(db, "MUSO_System", "DatabaseState")).then((docSnap) => {
+    // Other parts of the app (notably the SuperAdmin login) await this
+    // promise so they never render the table against stale/empty data on a
+    // brand-new device where localStorage hasn't been populated by the
+    // cloud yet. It always resolves (never rejects) so the app still works
+    // offline via the LocalStorage backup.
+    window._systemReadyPromise = getDoc(doc(db, "MUSO_System", "DatabaseState")).then((docSnap) => {
         if (docSnap.exists()) {
             const cloudData = docSnap.data();
             
@@ -471,6 +476,13 @@
                 localStorage.setItem('applicants', JSON.stringify(cloudData.applicants));
             }
             if (cloudData.config) {
+                // Guard against an older/partial cloud config that might be
+                // missing the "columns" shape - without this, renderTable()
+                // throws on .map() and the whole table silently stays blank.
+                if (!cloudData.config.columns) cloudData.config.columns = {};
+                if (!Array.isArray(cloudData.config.columns["Computer Position"])) cloudData.config.columns["Computer Position"] = [];
+                if (!Array.isArray(cloudData.config.columns["Welcome Position"])) cloudData.config.columns["Welcome Position"] = [];
+
                 window.config = cloudData.config;
                 localStorage.setItem('sysConfig', JSON.stringify(cloudData.config));
                 
@@ -665,6 +677,19 @@
             await window._firebaseLoginFn(email, password);
             currentRole = 'superadmin';
             closeAuthModal();
+
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Inapakia mfumo...';
+            // Wait for the initial cloud fetch to finish (or 6s timeout if
+            // offline/slow) so the table and marks boxes render against real
+            // data on first paint instead of appearing empty.
+            if (window._systemReadyPromise) {
+                await Promise.race([
+                    window._systemReadyPromise,
+                    new Promise(resolve => setTimeout(resolve, 6000))
+                ]);
+            }
+
             switchView('portal');
         } catch (err) {
             let msg = 'Login failed. Please check your credentials.';
