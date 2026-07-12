@@ -500,6 +500,7 @@
     }).catch(err => console.error("System running on LocalStorage backup. Cloud read failed - reason:", err.code || err.message || err));
 </script>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
     window.applicants = JSON.parse(localStorage.getItem('applicants')) || [];
     
@@ -682,12 +683,11 @@
         setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
     }
 
-    // Downloads the same marks data as printMarksSheet(), but as a real
-    // .xls file that opens directly in Excel (uses Excel's HTML-table
-    // import format, so no external library or internet connection is
-    // needed - everything happens locally in the browser).
+    // Downloads the marks data as a real, natively-editable .xlsx workbook
+    // (built with SheetJS, one sheet per position) - not an HTML-table hack.
+    // Rows are rearranged: Name -> Course (Programme) -> Reg No -> Marks/Position.
     function downloadMarksExcel() {
-        function buildPositionRows(position) {
+        function buildPositionSheetData(position) {
             const cols = window.config.columns[position] || [];
             let applicants = window.applicants
                 .filter(a => a.position === position)
@@ -699,61 +699,66 @@
                     return { ...app, totalMarks, percentage: parseFloat(percentage) };
                 });
 
-            if (applicants.length === 0) return '';
+            if (applicants.length === 0) return null;
 
-            applicants.sort((a, b) => b.percentage - a.percentage);
+            // Rearranged sort order: Name -> Course (Programme) -> Reg No -> Position/Marks
+            applicants.sort((a, b) => {
+                let byName = (a.name || '').localeCompare(b.name || '');
+                if (byName !== 0) return byName;
+                let byProgramme = (a.programme || '').localeCompare(b.programme || '');
+                if (byProgramme !== 0) return byProgramme;
+                let byRegNo = (a.regNo || '').localeCompare(b.regNo || '');
+                if (byRegNo !== 0) return byRegNo;
+                return b.percentage - a.percentage;
+            });
 
-            let colHeaders = cols.map(c => `<th>${c}</th>`).join('');
+            let header = ['#', 'Full Name', 'Programme (Course)', 'Reg No', 'Year', 'Position', ...cols, 'Total', 'Percentage'];
             let rows = applicants.map((app, i) => {
-                let markCells = cols.map((_, idx) => {
-                    let val = app.marks[idx] !== undefined && app.marks[idx] !== '' ? app.marks[idx] : '-';
-                    return `<td>${val}</td>`;
-                }).join('');
-                return `<tr>
-                    <td>${i + 1}</td>
-                    <td>${app.name}</td>
-                    <td>${app.regNo || ''}</td>
-                    <td>${app.programme || ''}</td>
-                    <td>${app.year || ''}</td>
-                    ${markCells}
-                    <td>${app.totalMarks}</td>
-                    <td>${app.percentage}</td>
-                </tr>`;
-            }).join('');
+                let markVals = cols.map((_, idx) => {
+                    let val = app.marks[idx];
+                    if (val === undefined || val === '') return '';
+                    let num = parseFloat(val);
+                    return isNaN(num) ? val : num;
+                });
+                return [i + 1, app.name, app.programme || '', app.regNo || '', app.year || '', app.position || '', ...markVals, app.totalMarks, app.percentage];
+            });
 
-            return `<table border="1">
-                <tr><td colspan="${5 + cols.length + 2}" style="font-weight:bold;background:#f1f5f9;">${position}</td></tr>
-                <tr>
-                    <th>#</th><th>Full Name</th><th>Reg No</th><th>Programme</th><th>Year</th>
-                    ${colHeaders}<th>Total</th><th>Percentage</th>
-                </tr>
-                ${rows}
-                <tr><td colspan="${5 + cols.length + 2}">&nbsp;</td></tr>
-            </table>`;
+            return [header, ...rows];
         }
 
-        let bodyHtml = buildPositionRows('Computer Position') + buildPositionRows('Welcome Position');
-        if (!bodyHtml) {
+        if (typeof XLSX === 'undefined') {
+            showModal('Excel export library failed to load. Please check your internet connection and try again.');
+            return;
+        }
+
+        const workbook = XLSX.utils.book_new();
+        let addedAny = false;
+
+        ['Computer Position', 'Welcome Position'].forEach(position => {
+            const sheetData = buildPositionSheetData(position);
+            if (!sheetData) return;
+            addedAny = true;
+
+            const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+            worksheet['!cols'] = sheetData[0].map((_, colIndex) => {
+                let maxLen = sheetData.reduce((max, row) => {
+                    let cell = row[colIndex];
+                    let len = cell === undefined || cell === null ? 0 : String(cell).length;
+                    return Math.max(max, len);
+                }, 8);
+                return { wch: Math.min(Math.max(maxLen + 2, 10), 40) };
+            });
+
+            let sheetName = position.replace(' Position', '').substring(0, 31) || 'Sheet';
+            XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        });
+
+        if (!addedAny) {
             showModal('No applicants with marks found to export.');
             return;
         }
 
-        let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-        <head><meta charset="UTF-8">
-        <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
-        <x:Name>Marks Sheet</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
-        </x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
-        </head>
-        <body>${bodyHtml}</body></html>`;
-
-        const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.ms-excel' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'MUSO_Marks_Sheet.xls';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
+        XLSX.writeFile(workbook, 'MUSO_Marks_Sheet.xlsx');
     }
 
     document.getElementById('registrationForm').addEventListener('submit', function(e) {
