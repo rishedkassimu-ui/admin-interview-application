@@ -368,6 +368,7 @@
                     <button onclick="createScoreColumns()" class="btn-success" style="padding: 0.75rem 1rem;">Generate Columns</button>
                     <button onclick="printNames()" class="btn-purple" style="float:none; margin-top:0; padding: 0.75rem 1rem;">Print Names A4</button>
                     <button onclick="printMarksSheet()" class="btn-purple" style="float:none; margin-top:0; padding: 0.75rem 1rem;">Print Marks Sheet A4</button>
+                    <button onclick="downloadMarksExcel()" class="btn-purple" style="float:none; margin-top:0; padding: 0.75rem 1rem;">Download Marks Sheet (Excel)</button>
                     <button onclick="clearAllData()" class="btn-danger" style="float:none; margin-top:0; padding: 0.75rem 1rem;">Delete All Data</button>
                 </div>
             </div>
@@ -679,6 +680,80 @@
         printWindow.document.close();
         printWindow.focus();
         setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
+    }
+
+    // Downloads the same marks data as printMarksSheet(), but as a real
+    // .xls file that opens directly in Excel (uses Excel's HTML-table
+    // import format, so no external library or internet connection is
+    // needed - everything happens locally in the browser).
+    function downloadMarksExcel() {
+        function buildPositionRows(position) {
+            const cols = window.config.columns[position] || [];
+            let applicants = window.applicants
+                .filter(a => a.position === position)
+                .map(app => {
+                    let totalMarks = 0;
+                    let possibleMax = cols.length * 100;
+                    cols.forEach((_, index) => { totalMarks += parseFloat(app.marks[index]) || 0; });
+                    let percentage = possibleMax > 0 ? ((totalMarks / possibleMax) * 100).toFixed(1) : "0.0";
+                    return { ...app, totalMarks, percentage: parseFloat(percentage) };
+                });
+
+            if (applicants.length === 0) return '';
+
+            applicants.sort((a, b) => b.percentage - a.percentage);
+
+            let colHeaders = cols.map(c => `<th>${c}</th>`).join('');
+            let rows = applicants.map((app, i) => {
+                let markCells = cols.map((_, idx) => {
+                    let val = app.marks[idx] !== undefined && app.marks[idx] !== '' ? app.marks[idx] : '-';
+                    return `<td>${val}</td>`;
+                }).join('');
+                return `<tr>
+                    <td>${i + 1}</td>
+                    <td>${app.name}</td>
+                    <td>${app.regNo || ''}</td>
+                    <td>${app.programme || ''}</td>
+                    <td>${app.year || ''}</td>
+                    ${markCells}
+                    <td>${app.totalMarks}</td>
+                    <td>${app.percentage}</td>
+                </tr>`;
+            }).join('');
+
+            return `<table border="1">
+                <tr><td colspan="${5 + cols.length + 2}" style="font-weight:bold;background:#f1f5f9;">${position}</td></tr>
+                <tr>
+                    <th>#</th><th>Full Name</th><th>Reg No</th><th>Programme</th><th>Year</th>
+                    ${colHeaders}<th>Total</th><th>Percentage</th>
+                </tr>
+                ${rows}
+                <tr><td colspan="${5 + cols.length + 2}">&nbsp;</td></tr>
+            </table>`;
+        }
+
+        let bodyHtml = buildPositionRows('Computer Position') + buildPositionRows('Welcome Position');
+        if (!bodyHtml) {
+            showModal('No applicants with marks found to export.');
+            return;
+        }
+
+        let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head><meta charset="UTF-8">
+        <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
+        <x:Name>Marks Sheet</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+        </x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+        </head>
+        <body>${bodyHtml}</body></html>`;
+
+        const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.ms-excel' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'MUSO_Marks_Sheet.xls';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
     }
 
     document.getElementById('registrationForm').addEventListener('submit', function(e) {
