@@ -367,6 +367,7 @@
                 <div class="form-group" style="display:flex; align-items:end; gap: 10px; flex-wrap: wrap;">
                     <button onclick="createScoreColumns()" class="btn-success" style="padding: 0.75rem 1rem;">Generate Columns</button>
                     <button onclick="printNames()" class="btn-purple" style="float:none; margin-top:0; padding: 0.75rem 1rem;">Print Names A4</button>
+                    <button onclick="printMarksSheet()" class="btn-purple" style="float:none; margin-top:0; padding: 0.75rem 1rem;">Print Marks Sheet A4</button>
                     <button onclick="clearAllData()" class="btn-danger" style="float:none; margin-top:0; padding: 0.75rem 1rem;">Delete All Data</button>
                 </div>
             </div>
@@ -597,6 +598,83 @@
             <div class="print-footer">All rights reserved, a product by RishedKassimu</div>
         </body></html>`;
         
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
+    }
+
+    // Prints an A4 sheet showing every applicant together with the marks
+    // already entered for them (per score column, plus total & percentage),
+    // grouped by position - unlike printNames() which only lists names.
+    function printMarksSheet() {
+        const printWindow = window.open('', '_blank');
+
+        function buildPositionTable(position, bg) {
+            const cols = window.config.columns[position] || [];
+            let applicants = window.applicants
+                .filter(a => a.position === position)
+                .map(app => {
+                    let totalMarks = 0;
+                    let possibleMax = cols.length * 100;
+                    cols.forEach((_, index) => { totalMarks += parseFloat(app.marks[index]) || 0; });
+                    let percentage = possibleMax > 0 ? ((totalMarks / possibleMax) * 100).toFixed(1) : "0.0";
+                    return { ...app, totalMarks, percentage: parseFloat(percentage) };
+                });
+
+            if (applicants.length === 0) return '';
+
+            applicants.sort((a, b) => b.percentage - a.percentage);
+
+            let colHeaders = cols.map(c => `<th>${c}</th>`).join('');
+            let rows = applicants.map((app, i) => {
+                let markCells = cols.map((_, idx) => {
+                    let val = app.marks[idx] !== undefined && app.marks[idx] !== '' ? app.marks[idx] : '-';
+                    return `<td style="text-align:center;">${val}</td>`;
+                }).join('');
+                return `<tr>
+                    <td style="text-align:center;">${i + 1}</td>
+                    <td>${app.name}<br><small>${app.regNo || ''} | ${app.programme || ''} (Y${app.year || ''})</small></td>
+                    ${markCells}
+                    <td style="text-align:center;"><strong>${app.totalMarks}</strong></td>
+                    <td style="text-align:center;"><strong>${app.percentage}%</strong></td>
+                </tr>`;
+            }).join('');
+
+            return `
+                <h3 style="background:${bg}; padding:8px; border-radius:4px;">${position} — ${applicants.length} Applicants</h3>
+                <table>
+                    <thead><tr>
+                        <th>#</th><th>Full Name & Details</th>${colHeaders}<th>Total</th><th>%</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+        }
+
+        let bodyHtml = buildPositionTable('Computer Position', '#eff6ff') + buildPositionTable('Welcome Position', '#fef2f2');
+        if (!bodyHtml) bodyHtml = '<p style="text-align:center;">No applicants with marks found.</p>';
+
+        let html = `<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Applicants Marks Sheet Printout</title>
+            <style>
+                @page { size: A4 landscape; margin: 12mm; }
+                body { font-family: 'Segoe UI', sans-serif; font-size: 10pt; color: #1e293b; margin: 0; }
+                h2 { text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 10px; }
+                h3 { margin-top: 25px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th, td { border: 1px solid #cbd5e1; padding: 6px; font-size: 9pt; }
+                th { background-color: #f1f5f9; }
+                .print-footer { text-align: center; padding: 15px 0; font-size: 9pt; color: #475569; border-top: 1px solid #cbd5e1; margin-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <h2>MUSO Registration - Applicants Marks Sheet</h2>
+            ${bodyHtml}
+            <div class="print-footer">All rights reserved, a product by RishedKassimu</div>
+        </body></html>`;
+
         printWindow.document.write(html);
         printWindow.document.close();
         printWindow.focus();
